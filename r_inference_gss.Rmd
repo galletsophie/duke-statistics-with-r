@@ -1,0 +1,184 @@
+---
+title: "Statistical inference with the GSS data"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+    author: Sophie Gallet
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(kableExtra)
+```
+
+### Load data
+
+```{r load-data}
+load("gss.Rdata")
+```
+
+* * *
+
+## Part 1: Data
+
+### Study design
+The dataset is a sample of 57,061 observations from the General Society Survey (GSS). The time period ranges from 1972 and 2012, and the respondents are residents of the USA aged 18 and older living in a household. As a consequence, the homeless population is excluded from the analysis. Additionnally I would expect undocumented adults to avoid participating in the study.
+
+Random sampling was used to gather the data. The results can be generalized to the population of interest (see below).
+This is an observational study and not an experiment, and as such, we won’t be able to use causal association. 
+
+### Bias 
+There are two main concerns regarding bias for this study, which I expect to be fairly distributed among the sampled population:
+<ul>
+  <li>The study requires the respondent to volunteer to answer questions, in-person, for about one hour. As a result, certain parts of the population who do not have time or are not willing to do this may be underrepresented.
+  <li>Some questions cover sensitive topics and raise the problem of distortions or errors by respondents who would want to avoid embarrassment and jugement, consciously or unconsciously. This would be defined as the social desirability bias and is quite common in many studies linked to sensitive questions.
+</ul>
+
+### Generalization
+
+In light of the above remarks, the results of the study can be generalized to adults aged 18 and older, living in the USA, with the exception of homeless people and undocumented adults. 
+
+* * *
+
+## Part 2: Research question
+
+### Is there a relationship between political party affiliation and opinion on money spending towards improving and protecting the environment?
+
+Many believe that the environmental situation is now one of the biggest challenges facing humanity. Yet, for various reasons, there are also many who do not approve of spending money to improve and protect the environment. I would expect people from different party affiliations to have different opinions with regards to spending to improve and protect the environment, and I'm curious to see if it's actually the case. The results of this study could be used by political parties, politicians and environmental NGOs, for instance to inform future donation and communication strategies.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+The two variables of interest for this study, party affiliation and opinion on environmental spending, are categorical variables. As such, the relevant plots and statistics are a bar plot and a two-way table. 
+
+```{r plot-partyid-natenvir}
+ggplot(gss, aes(x = partyid, fill = natenvir)) + 
+  geom_bar(position = "fill") +
+  coord_flip() + 
+  labs(title = "Party Affiliation and Opinion on Environmental Spending",
+      x = "Party Affiliation", 
+      y = "Percentage", 
+      fill = "Opinion on Env Spending") +
+  theme_classic() + 
+  theme(legend.position = "bottom")
+```
+
+There seems to be some differences in opinion between sampled adults belonging to different party affiliations. We notice a large proportion of NAs corresponding to IAP, DK, or NA. 
+
+The two way table below helps get a better sense of the numbers and sizes in each group. 
+
+```{r two_way-partyid-natenvir}
+#the first table will be used for inference and expected counts
+actual_counts = with(gss, table(partyid, natenvir))
+total = colSums(actual_counts)
+
+#adding totals to the first table for a good overview
+enhanced_actual_counts = rbind(actual_counts,
+                "Total" = total)  
+sum_row = rowSums(enhanced_actual_counts[,1:3])
+enhanced_actual_counts = cbind(enhanced_actual_counts,
+                "Total" = sum_row)
+           
+kable(enhanced_actual_counts) %>%
+  kable_styling(bootstrap_options = c("striped", "hover","condensed")) %>%
+  row_spec(9, bold = T, color = "white", background = "#008080") %>%
+  column_spec(5, bold = T, border_right = T, border_left = T)
+```
+
+We can see that each cell has a large number of observations, >= 49. 
+
+Lastly, let's look at the proportion table:  
+```{r prop-partyid-natenvir}
+prop_table = round(rbind(head(actual_counts/ rowSums(actual_counts),8),
+                   "Average" = total/sum(total)),2)
+
+kable(prop_table) %>%
+  kable_styling(bootstrap_options = c("striped", "hover","condensed")) %>%
+  row_spec(9, bold = T, color = "white", background = "#008080")
+```
+
+For all subgroups affiliated with Democrats, and independent close to Democrats, the proportion of subjects thinking too little was spent on the environment is striclty higher than the sample average (61%). Similarly, the proportion of subjects thinking too much was spent is strictly lower than the sample average (09%). 
+
+Conversely, all subgroups affiliated with Republican had a strictly lower than average proportion of subjects thinking too little was spent on the environment, and a strictly higher than average proportion of subjects thinking too much was spent. 
+
+The exploratory data analysis highlights some differences between groups with different political affiliation in regards to their opinion on spending to improve and protect the environment. Let's now look whether there is statistical evidence supporting a relationship between party affiliation and opinion on environmental spending, or if the displayed differences could be due to chance. 
+
+* * *
+
+## Part 4: Inference
+
+### Hypotheses
+
+<ul>
+  <li>H0: The two categorical variables partyid and natenvir are independent. There is no relationship between party affiliation and opinion on environmental spending. </li>
+  <li>HA: The two variables are dependent. There is a relationship between party affiliation and opinion on environmental spending</li>
+</ul>
+
+### Method & Conditions
+
+We're evaluating the relationship between two categorical variables, both with more than two levels. We'll use the **Chi-Square Independence Test**, relevant when studying two categorical variables where at least one has more than two levels. 
+
+The conditions for the chi-square test of independence are all met:
+<ul>
+  <li>Independence: the sampled observations are independent.\n 
+  Our sample is random. We've sampled without replacement less than 10% of the overall population. Each case contributes to only one cell in the table. </li>
+  <li>Sample size: \n
+  There are at least 5 expected cases in each cell (see table below)</li>
+</ul>
+
+```{r expected-counts}
+#we'll use a chi-square test to get the expected counts easily
+chi_sq_a <- chisq.test(enhanced_actual_counts)
+
+#displaying both counts
+actual_exp_counts <- enhanced_actual_counts
+actual_exp_counts[] <- paste(enhanced_actual_counts, paste0("(", round(chi_sq_a$expected), ")"))
+noquote(actual_exp_counts)
+```
+
+The table above shows the actual counts and, between brackets, the expected counts. We can see that all cells have an expected count of at least 5 (the smallest expected count being 41, for Other Party / Too Much). 
+
+### Inference
+All the conditions are met, we can use the Chi-squared test of independence for inference: 
+
+```{r chi-squared}
+chi_sq <- chisq.test(actual_counts)
+chi_sq
+```
+
+Note that we get the right number of degrees of freedom: \n 
+14 = (8-1) \* (3-1) = (number of party affiliations - 1) \* (number of opinion categories - 1)
+
+For verification, I also calculated manually the test statistics and the chi-squared test:
+
+```{r verification}
+chi_sq2 = 0 
+for (i in c(1:8)){
+  for (j in c(1:3)){
+    chi_sq2 = chi_sq2 + (actual_counts[,j][i] - round(chi_sq_a$expected[,j][i]))^2 / round(chi_sq_a$expected[,j][i])
+  }}
+names(chi_sq2) <- "chi-squared"
+df = (8-1)*(3-1)
+
+print(c("df" = df, 
+        chi_sq2, 
+        "p-value" = round(pchisq(chi_sq2, df, lower.tail = F),4)))
+```
+
+We can see that we get similar results, with a rounded chi-squared value of 861.8 (vs. 862.6), and a very small p-value.   
+
+### Interpretation
+
+The Chi-squared test returns an extremely small p-value: it would be very unlikely to observe the data we observed, were the null hypothesis true. The data provide strong evidence against the null hypothesis. We reject the null hypothesis and accept the alternative hypothesis. 
+
+Using the data from the GSS, we found that there is a relationship between opinion on environmental spending and political party affiliation. \n
+Further statistical analysis could be done to find which party affiliations are more/less in favor of environmental spendings, and whether other respondent characteristics, such as demographics, are associated with opinions on environmental spending. 

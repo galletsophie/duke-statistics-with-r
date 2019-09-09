@@ -1,0 +1,311 @@
+---
+title: "Ames EDA with R - Duke University Capstone"
+output:
+  html_document: 
+    pandoc_args: [
+      "--number-sections",
+    ]
+---
+
+
+First, let us load the data and necessary packages:
+
+```{r load, message = FALSE}
+load("ames_train.Rdata")
+library(MASS)
+library(dplyr)
+library(ggplot2)
+library(kableExtra)
+```
+
+#
+Make a labeled histogram (with 30 bins) of the ages of the houses in the data set, and describe the distribution.
+
+
+```{r Q1}
+#Create the age variable (data collected between 2006 and 2010, thus choosing 2010 as the upper limit for age)
+ames_train <- ames_train %>%
+  mutate(age = 2010 - Year.Built)
+
+#Plot the histogram
+ggplot(ames_train, aes(x=age)) + 
+  geom_histogram(bins = 30, fill = "#008080") +
+  labs(title = "Age of the Houses") + 
+  theme_classic() 
+
+#Calculate and print basic statistics 
+mean_age = mean(ames_train$age)
+median_age = median(ames_train$age)
+min_age = min(ames_train$age)
+max_age = max(ames_train$age)
+
+#Function to get the mode 
+getmode <- function(x) {
+   unique_x <- unique(x)
+   unique_x[which.max(tabulate(match(x, unique_x)))]
+}
+mode_age = getmode(ames_train$age)
+
+round(c("mean" = mean_age, "median" = median_age, "mode" = mode_age, "min" = min_age, "max" = max_age),2)
+```
+
+* * *
+
+The distribution of the ages of the houses in the dataset is right-skewed, with a fairly high number of new/newer houses.
+It is multimodal, with the mode in the strict sense at 5 years, and other smaller modes around 30 and 55 years. 
+The distribution is centered roughly at 35 years, the value of the median. The youngest house is 0 years old, brand new, while the oldest is almost 140 years old. 
+
+* * *
+
+
+#
+The mantra in real estate is "Location, Location, Location!" Make a graphical display that relates a home price to its neighborhood in Ames, Iowa. Which summary statistics are most appropriate to use for determining the most expensive, least expensive, and most heterogeneous (having the most variation in housing price) neighborhoods? Report which neighborhoods these are based on the summary statistics of your choice. Report the value of your chosen summary statistics for these neighborhoods.
+
+```{r Q2}
+#Boxplot Price vs. Neighborhood
+ggplot(ames_train, aes(x = Neighborhood, y = price)) + 
+  geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  labs(title = "House Price per Neighborhood", y = "Price", x = "Neighborhood")
+
+#Calculate median price and IQR per neighborhood
+location <- ames_train %>%
+  group_by(Neighborhood) %>%
+  summarise(med_price = median(price),
+            iqr_price = IQR(price))
+
+#Calculate & print key stats
+min_price = min(location$med_price)
+max_price = max(location$med_price)
+max_iqr = max(location$iqr_price)
+
+min_neigh = subset(location, location$med_price == min_price)
+max_neigh = subset(location, location$med_price == max_price)
+max_iqr = subset(location, location$iqr_price == max_iqr)
+
+neigh_stat = cbind("Stat" = c("Min","Max","High.IQR"),rbind(min_neigh, max_neigh, max_iqr))
+
+kable(neigh_stat) %>%
+  kable_styling(bootstrap_options = c("striped", "hover","condensed"),full_width = F)
+```
+
+
+
+* * *
+
+As the distribution of the price variable is right skewed, the median, less sensitive to skew and outliers, appears to be the most appropriate statistics to determine a house price based on its neighborhood. 
+Looking at the graph, we can see that the most expensive neighborhood is Stone Brook, with a median price of \$340,691.5, and the least expensive Meadow Village with a median price of \$85,750. 
+We used median as a mesure of center, thus the InterQuartile Range (IQR) is the appropriate measure of spread: the neighborhood with the highest spread is also Stone Brook, with an IQR of $151,358. 
+(We note that using the mean and the standard deviation actually yields the same results)
+
+* * *
+
+# 
+Let's find the variable with the largest number of missing values, and explain why it makes sense.
+
+```{r Q3}
+#Create a table counting the NAs, ordering it by descending order
+na_count <- data.frame("na_count" = colSums(is.na(ames_train)))
+head(na_count[order(-na_count), , drop = FALSE],5)
+```
+
+
+* * *
+
+The Pool.QC variable, representing the pool quality, has the largest number of missing values, with 997 missing values (for 1,000 observations). This makes sense given that most of the houses probably don't have a pool, and all houses without pool take the null value for this variable. 
+
+* * *
+
+#
+
+We want to predict the natural log of the home prices. Candidate explanatory variables are lot size in square feet (Lot.Area), slope of property (Land.Slope), original construction date (Year.Built), remodel date (Year.Remod.Add), and the number of bedrooms above grade (Bedroom.AbvGr). Pick a model selection or model averaging method covered in the Specialization, and describe how this method works. Then, use this method to fsind the best multiple regression model for predicting the natural log of the home prices.
+
+
+```{r Q4}
+#Create log_price variable
+ames_train <- ames_train %>%
+  mutate(log_price = log(price))
+
+#Full model
+m_full <- lm(log_price ~ Lot.Area + Land.Slope + Year.Built + Year.Remod.Add + Bedroom.AbvGr,
+             data = ames_train)
+
+#Step 1 
+m1 <- lm(log_price ~ Land.Slope + Year.Built + Year.Remod.Add + Bedroom.AbvGr,
+             data = ames_train)
+
+m2 <- lm(log_price ~ Lot.Area + Year.Built + Year.Remod.Add + Bedroom.AbvGr,
+             data = ames_train)
+
+m3 <- lm(log_price ~ Lot.Area + Land.Slope + Year.Remod.Add + Bedroom.AbvGr,
+             data = ames_train)
+
+m4 <- lm(log_price ~ Lot.Area + Land.Slope + Year.Built + Bedroom.AbvGr,
+             data = ames_train)
+
+m5 <- lm(log_price ~ Lot.Area + Land.Slope + Year.Built + Year.Remod.Add,
+             data = ames_train)
+
+summary_r_squared <- data.frame(model = c("Full","-Lot.Area","-Land.Slope","-Year.Built","-Year.Remod.Add","-Bedroom.AbvGr"), 
+                                adj.r.squared = c(summary(m_full)$adj.r.squared,summary(m1)$adj.r.squared,summary(m2)$adj.r.squared,summary(m3)$adj.r.squared,summary(m4)$adj.r.squared,summary(m5)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+```
+
+* * *
+
+I've decided to conduct backwards model elimination with the adjusted R squared on my linear model, which, compared to the p-value, does not depend on an arbitrary significance level. It is also supposed to yield more reliable predictions. 
+
+The way this model selection works is that we start with the full model, then drop one variable at the time, recording the adjusted R squared of each new (reduced) model. We then pick the reduced model with the highest adjusted R squared, and repeat the previous step until we don't record any increases in adjusted R squared anymore. At this point, we've found a parsimonious model. 
+
+It appears that the full model is the model with the highest adjusted R squared, and thus our best model to predict the natural log of home prices. 
+
+* * *
+
+#
+
+Which home has the largest squared residual in the previous analysis (Question 4)? Looking at all the variables in the data set, can you explain why this home stands out from the rest (what factors contribute to the high squared residual and why are those factors relevant)?
+
+
+```{r Q5}
+#Print the three homes with the largest squared residuals
+tail(sort(m_full$residuals^2),3)
+
+
+#Some characteristcs of the home with largest squared residual 
+ames_train[which(m_full$residuals^2 == max(m_full$residuals^2)),][c("Sale.Condition", "Year.Built", "Lot.Area","log_price", "Overall.Qual", "Bedroom.AbvGr")]
+
+```
+
+
+```{r}
+#Stats for houses' overall quality
+round(c("Overall.Qual.mean" = mean(ames_train$Overall.Qual),
+  "Overall.Qual.median" = median(ames_train$Overall.Qual),
+  "Overall.Qual" = quantile(ames_train$Overall.Qual,.01),
+  "Corr. Ovrl.Qual & log_price" = cor(ames_train$Overall.Qual,ames_train$log_price)),2)
+```
+
+* * *
+
+We find that the observation 428, with a squared residuals of 4.36 has the highest squared residuals, more than 4 times higher than the second highest squared residual. 
+
+A high residual results in the model not being able to explain the variability in the log(price) of that home. It could be that this observation has outlying values in some or all of the variables used in the model, or that other characteristics, not taken into account in the model, may contribute to added variability. 
+
+When taking a look at the variables in the dataset, we find a few interesting facts:
+The house was sold at the lowest price of all the houses in the dataset, by far (see plot below), making it a strong outlier in terms of price - it was sold at 7% of the median price of all houses in the dataset. This only could explain the high squared residual. 
+
+We also find that the house was in the lowest 1% in terms of overall quality, when overall quality has a high correlation coefficient with the log(price) of a house, that for the lot area, the number of bedrooms, the price it sold at was really low (less than 10% of houses with similar characteristics), and that the sale condition was abnormal, all of which could help explain the high squared residual.  
+
+```{r}
+plot(ames_train$log_price, col = ifelse(ames_train$log_price < 9.5, "red","black"), main = "Houses' Log Prices", ylab = "log(price)")
+```
+
+
+* * *
+
+#
+
+Use the same model selection method you chose in Question 4 to again find the best multiple regression model to predict the natural log of home prices, but this time **replacing Lot.Area with log(Lot.Area)**. Do you arrive at a model including the same set of predictors?
+
+
+```{r Q6}
+#Create log(Lot.Area) variable
+ames_train <- ames_train %>%
+  mutate(log_Lot.Area = log(Lot.Area))
+
+#Full model
+m_full2 <- lm(log_price ~ log_Lot.Area + Land.Slope + Year.Built + Year.Remod.Add + Bedroom.AbvGr,
+             data = ames_train)
+
+#Step 1 
+ma <- lm(log_price ~ Land.Slope + Year.Built + Year.Remod.Add + Bedroom.AbvGr,
+             data = ames_train)
+
+mb <- lm(log_price ~ log_Lot.Area + Year.Built + Year.Remod.Add + Bedroom.AbvGr,
+             data = ames_train)
+
+mc <- lm(log_price ~ log_Lot.Area + Land.Slope + Year.Remod.Add + Bedroom.AbvGr,
+             data = ames_train)
+
+md <- lm(log_price ~ log_Lot.Area + Land.Slope + Year.Built + Bedroom.AbvGr,
+             data = ames_train)
+
+me <- lm(log_price ~ log_Lot.Area + Land.Slope + Year.Built + Year.Remod.Add,
+             data = ames_train)
+
+summary_r_squared <- data.frame(model = c("Full","-log(Lot.Area)","-Land.Slope","-Year.Built","-Year.Remod.Add","-Bedroom.AbvGr"), 
+                                adj.r.squared = c(summary(m_full2)$adj.r.squared,summary(ma)$adj.r.squared,summary(mb)$adj.r.squared,summary(mc)$adj.r.squared,summary(md)$adj.r.squared,summary(me)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+
+```
+
+* * *
+
+I do find the same set of predictors using log(Lot.Area) instead of Lot.Area, and it's the full model again, as it yields the highest adjusted R squared. We note though that this second model, with log(Lot.Area), leads to a higher adjusted R squared (.60 vs. .56), a difference that is not negligible. 
+
+* * *
+
+#
+
+Do you think it is better to log transform Lot.Area, in terms of assumptions for linear regression? Make graphs of the predicted values of log home price versus the true values of log home price for the regression models selected for Lot.Area and log(Lot.Area). Referencing these two plots, provide a written support that includes a quantitative justification for your answer in the first part of question 7.
+
+```{r Q7}
+#Fitted vs. true value
+plot(ames_train$log_price, m_full$fitted, main = "Predicted vs. True - Lot.Area", xlab = "log(price)", ylab = "Fitted values"); abline(lm(ames_train$log_price~m_full$fitted), lwd =2, col = "dark blue")
+
+plot(ames_train$log_price, m_full2$fitted, main = "Predicted vs. True - log(Lot.Area)", xlab = "log(price)", ylab = "Fitted values");  abline(lm(ames_train$log_price~m_full2$fitted), lwd =2, col = "dark blue")
+
+#Additional diagnostic plots, linear relationship 
+par(mfrow = c(1,2))
+plot(m_full$residuals ~ ames_train$Lot.Area, main = "Residual Plot, e vs. Lot.Area", xlab = "Lot.Area", ylab = "Residuals")
+
+plot(m_full2$residuals ~ ames_train$log_Lot.Area, main = "Residual Plot, e vs. log(Lot.Area)", xlab = "Lot.Area", ylab = "Residuals")
+
+#Additional diagnostic plots, nearly normal residuals, mean 0
+par(mfrow = c(2,2))
+qqnorm(m_full$residuals, main = "Normal Probability Plot of Residuals - Lot.Area")
+qqline(m_full$residuals)
+hist(m_full$residuals, breaks = 30, main = "Histogram of Residuals - Lot.Area")
+
+qqnorm(m_full2$residuals, main = "Normal P. Plot of Residuals - log(Lot.Area)")
+qqline(m_full2$residuals)
+hist(m_full2$residuals, breaks = 30, main = "Histogram of Residuals - log(Lot.Area)")
+
+#Additional diagnostic plots, constant variability
+par(mfrow = c(1,1))
+plot(m_full$residuals ~ m_full$fitted.values, main = "Residuals vs. Predicted - Lot.Area")
+
+plot(m_full2$residuals ~ m_full2$fitted.values, main = "Residuals vs. Predicted - log(Lot.Area)")
+
+#Additional diagnostic plots, independence of residuals
+plot(m_full$residuals, main = "Residuals vs. Order of data - Lot.Area")
+
+plot(m_full2$residuals, main = "Residuals vs. Order of data - Lot.Area")
+
+```
+
+* * *
+
+The assumptions for linear regression are the following: 
+<ul>
+  <li> Linear relationship between x (numerical) and y 
+  <li> Nearly normal residuals centered at 0 
+  <li> Constant variability of residuals
+  <li> Independence of residuals
+</ul>
+
+The plots required by the exercice (predicted vs. true) show a more linear relationship when using the log transform of Lot.Area, as well as what appears to be a stronger relationship between predicted and true value, meaning that the second model is better at predicting, which is confirmed by a higher adjusted R squared for the second model.  
+
+The additional plots that are commonly used to do diagnostics on multiple linear regression models all confirm that the assumption for linear regression are met for the second model better than for the first model: 
+<ul>
+  <li> The residual plot shows a random scatter around 0 for both models, but the second one seems more 'random'. The linear relationship conditions between log(Lot.Area) and the response variable is met. We can see clearly the outlier 428 in this plot. 
+  <li> We can see using the normal probability plot and/or the histogram that the distribution of the residuals is nearly normal, centered at 0, for both models.
+  <li> The constant variability of residuals, materialized by residuals being randomly scattered in a band of constant width, centered at 0, is better met for model 2. 
+  <li> The independence of residuals, linked to the study design, is the same for both models. We can see no time series structure in the plots Residuals vs. Order of data.
+</ul>
+
+All in all, I would recommend using the log transform of Lot.Area. 

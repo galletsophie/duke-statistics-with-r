@@ -1,0 +1,327 @@
+---
+title: "Bayesian modeling and prediction for movies"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(MASS)
+library(dplyr)
+library(statsr)
+library(BAS)
+```
+
+### Load data
+
+
+```{r load-data}
+load("movies.Rdata")
+```
+
+
+
+* * *
+
+## Part 1: Data
+The data set is the result of random sampling 651 movies released before 2016 using Rotten Tomatoes and IMDb's The data set is the result of random sampling 651 movies released before 2016 using Rotten Tomatoes and IMDb's APIs. As random sampling was used, and the random sample represents less than 10% of all movies released before 2016, we'll be able to generalize the findings of our study to the population of interest: 
+
+Both websites are owned by American companies, Fadango and Amazon respectively, and written in English. While they do feature 'foreign' movies, we can expect a higher representation of American and English speaking movies, critics, and audience. In addition, some of the variables in the data set that might be used in our model, specifically Oscar awards and box office, are geared towards the American audience. 
+Regarding the release years, in order to avoid extrapolation, and despite the absence of elements that are likely to significantly change the findings in this study, we can generalize the results to movies released before 2016.
+
+In light of this and given the use of random sampling we can assess that our findings, and in particular any association between variables, can be generalized to all movies made for the American market and released before 2016. 
+
+This is an observational study, not an experiment with random assignment, thus we cannot prove causation.  
+
+Note:  Given that Paramount Pictures is an American company making most of its revenues in the US, I would expect the generalization to the American movie market only to be satisfying for this project. Otherwise, I would recommend including top rating websites from other countries (such as Allocine.fr for France) if additional national markets were to be considered. 
+
+
+* * *
+
+## Part 2: Data manipulation
+
+The following chunks of code create the variables needed for the project. 
+Note that for each of them, I verified that the numbers do match, but didn't include the code in the final project to keep it short and improve readibility.  
+
+```{r feature_film}
+#Create feature_film variable
+movies <- movies %>%
+  mutate(feature_film = ifelse(title_type == "Feature Film", "yes", "no"))
+
+```
+
+```{r drama}
+#Create drama variable
+movies <- movies %>%
+  mutate(drama = ifelse(genre == "Drama", "yes", "no"))
+
+```
+
+```{r mpaa_rating_R}
+#Create mpaa_rating_R variable
+movies <- movies %>%
+  mutate(mpaa_rating_R = ifelse(mpaa_rating == "R", "yes", "no"))
+
+```
+
+```{r season}
+table(movies$thtr_rel_month)
+
+#Create oscar_season variable
+movies <- movies %>%
+  mutate(oscar_season = ifelse(thtr_rel_month %in% c(10,11,12), "yes", "no"))
+  
+#Create summer_season variable
+movies <- movies %>%
+  mutate(summer_season = ifelse(thtr_rel_month %in% c(5,6,7,8), "yes", "no"))
+
+
+```
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+All the newly created variables are categorical, and more precisely contain two categories each time (yes/no), while the audience_score variable is numerical, made of integer numbers ranging from 0 to 100, in theory, and 11 to 97 in our sample. 
+
+As a result, side-by-side boxplots will be the best plots to conduct exploratory data analysis of the relationships between the audience_score variable and the newly created variables. 
+As the distribution of the audience_score variable is left-skewed (see below), the 5-number summary for each category should be the most relevant summary statistics. 
+
+
+```{r hist-audience-score}
+
+ggplot(movies,aes(x=audience_score)) + 
+  geom_histogram(binwidth = 5) +
+  labs(title = "Histogram of Audience Score", x="Audience Score") +
+  theme_classic() 
+```
+
+### Feature Film & Audience Score
+
+Let's take a look at the relationship between being a feature film, or not, and the audience score, using a side-by-side boxplot, and the five-number summary for each category:
+
+```{r plot-audience-feature_film}
+boxplot(audience_score~feature_film,data=movies)
+```
+```{r stats-audience-feature_film}
+movies %>% 
+  group_by(feature_film) %>%
+  summarize(min=min(audience_score),
+            q1=quantile(audience_score,.25),
+            med=median(audience_score),
+            q3=quantile(audience_score,.75),
+            max=max(audience_score)) %>%
+  arrange(desc(feature_film))
+
+```
+
+There are clear differences between the two categories:
+The "Feature Films", under the "yes" category, show a higher spread, both in terms of range (86 vs. 77) and IQR (33.5 vs. 12.5) than the movies under the "no" category. 
+The movies under the "yes" category have lower audience scores: the median is more than 20 points below the median of the "no" category, and while 75% of the movies in the "yes" category have an audience score under 78 points, 75% of the movies in the "no" category have an audience score above 76.5 points. 
+
+Some of those differences could be explained by the difference in sizes between the two categories, illustrated by the table below. There are almost 10 times more "Feature Film" movies in our sample than not "Feature Film" movies. 
+
+```{r size-feature_film}
+table(movies$feature_film)
+```
+
+While we note important size differences between the two categories for the feature_film variable, the boxplots and summary statistics suggest that there is a strong relationship between the audience score for a movie, and whether it is a feature film or not: feature film movies in the sample have much lower audience scores, compared to non feature film movies. 
+
+### Drama & Audience Score
+
+```{r plot-audience-drama}
+boxplot(audience_score~drama,data=movies)
+```
+
+```{r stats-audience-drama}
+movies %>% 
+  group_by(drama) %>%
+  summarize(min=min(audience_score),
+            q1=quantile(audience_score,.25),
+            med=median(audience_score),
+            q3=quantile(audience_score,.75),
+            max=max(audience_score)) %>%
+  arrange(desc(drama))
+```
+
+The side-by-side boxplots and the five-number summaries show a lower spread, both in terms of range and IQR, and higher average audience score, as defined by the median, for movies that are drama (under the "yes" category), compared to movies that aren't. 
+
+This time, both categories contain roughly the same numbers of movies. 
+
+```{r size-drama}
+table(movies$drama)
+```
+
+In summary, the boxplots and statistic summaries suggest a relationship between whether the movie is a drama and its audience score: we've observed higher audience scores for drama movies. 
+
+
+### Oscar Season & Audience Score
+
+```{r audience-oscar_season}
+boxplot(audience_score~oscar_season,data=movies)
+```
+
+```{r stats-audience-oscar}
+
+movies %>% 
+  group_by(oscar_season) %>%
+  summarize(min=min(audience_score),
+            q1=quantile(audience_score,.25),
+            med=median(audience_score),
+            q3=quantile(audience_score,.75),
+            max=max(audience_score)) %>%
+  arrange(desc(oscar_season))
+
+```
+
+The five-number summary statistics and the boxplots show similar ranges and IQRs for both categories, but the "yes" category boasts slighlty higher numbers for its first quartile, median, and third quartile.
+
+As expected given that the "Oscar season" lasts only 3 months, the sizes of the two categories differ, with the "no" category containing almost 2.5 times more movies than the "yes" category. 
+
+```{r size-oscar}
+table(movies$oscar_season)
+```
+
+The boxplots and summary statistics suggest a very weak relationship between a movie being released during the Oscar season, from October to December, and its audience rating. We've observed slighlty higher audience scores for movies released in the Oscar season. 
+
+
+I didn't find as striking differences when plotting and summarizing the relationship between audience_score and the newly created variables summer_season and mpaa_rating_R. As a result, I decided not to display those graphs and data summaries. 
+
+* * *
+
+## Part 4: Modeling
+### Backwards Selection with BIC
+
+First, let's create a reduced data set comprising only the audience_score variables and the predictors for the project, and remove the row with a null value. 
+```{r reduced-data}
+movies_red <- movies %>%
+  select(audience_score,
+         feature_film,
+         drama,
+         runtime,
+         mpaa_rating_R,
+         thtr_rel_year,
+         oscar_season,
+         summer_season,
+         imdb_rating,
+         imdb_num_votes,
+         critics_score,
+         best_pic_nom,
+         best_pic_win,
+         best_actor_win,
+         best_actress_win,
+         best_dir_win,
+         top200_box)
+
+movies_red = na.omit(movies_red)
+```
+Without prior information, and under the default reference prior, our model will be the same as with inferential statistics.
+```{r full_model}
+full_model = lm(audience_score ~ .,
+                data = movies_red)
+summary(full_model)
+```
+With Bayesian statistics, we'll be using BIC, Bayesian Information Criterion, to carry out variable and model selection. Our goal is to minimize BIC.
+```{r bic-full}
+BIC(full_model)
+```
+
+Hopefully, we won't need to carry out model selection by hand, and can use the MASS built in function stepAIC, which takes a full model and a penalization parameter log(n). 
+
+
+```{r stepaic}
+stepAIC(lm(audience_score ~ ., data = movies_red), k = log(length(movies_red)))
+```
+
+Our best model using the backwards selection with BIC thus includes the following 6 variables: runtime, mpaa_rating, imdb_rating, critics_score, best_pic_nom and best_actress_win. 
+
+We can easily interpret its coefficients: 
+With negative coefficients for the value yes, we would expect, on average, the audience_score to decrease by -1.5 point and/or -2.23 points respectively if mpaa_rating and/or best_actress_win have the value yes. Conversely, we would expect the audience_rating to increase by 4.6 points if the movie was nominated for Best Pictures. 
+For the numerical variables, we would expect, on average, the audience_score to increase (when the coefficient is positive) or decrease (when it's negative) by a number of points corresponding to the absolute value of the coefficient for each point increase in the explanatory variable in question. Hence, we would expect the audience_score to increase by 12.96 points when the IMDB rating increases by one point. 
+
+### BMA
+Note that selecting only one model, when several could be equally possible ignores the uncertainty around model selection. Using Bayesian Model Averaging (BMA) allow us to avoid this. Note that as we have many predictors (16), we have too many models (2 power 16) to enumerate then and thus we use the Markov Chain Monte Carlo method.  
+
+```{r bma-model}
+bma_model = bas.lm(audience_score ~ ., 
+                   data = movies_red,
+                   prior = "BIC",
+                   modelprior = uniform(),
+                   method = "MCMC")
+bma_model
+summary(bma_model)
+```
+We can thus see the most probable models, along with marginal posterior inclusion probabilities for each variable. A variable with a marginal posterior inclusion probability of 1, such as IMDB ratings is almost certainly included in the true model, while a variable with an low marginal posterior inclusion probability is less likely to be included in the true model. 
+
+Here we can see that two first models have very similar posterior probability at 12.95%, when the following ones have posterior probabilities below 4%. They're our two most likely models using BMA, and yet, the sum of the two posterior probability only adds up to less than 26%, showing clearly the uncertainty in our model selection.  
+
+### Diagnostics
+```{r diagnostics}
+diagnostics(bma_model)
+```
+
+This plot allows us to see if we've run the MCMC long enough. We can see that the PIP (posterior inclusion probability) renormalized and the PIP (MCMC) are in close argument. 
+
+```{r residuals-fitted}
+plot(bma_model, which=1, add.smooth = F)
+```
+
+Here we want to see if the spread of the residuals is constant and if there are outliers. In our case, it's far from perfect, but we'll still consider this is good enough. 
+
+```{r model-probabilities}
+plot(bma_model, which=2, add.smooth = F)
+```
+
+We can see that with MCMC, we sampled about 5,000 models, and that the probability curve plateaus, which indicates that the additional models didn't add much information, i.e. probabilities.
+
+```{r model-complexity}
+plot(bma_model, which=3)
+```
+
+
+With the presence of outliers at the bottom left of this plot, it's harder to spot which model dimensions have the highest Bayes Factors or marginal likelihoods. 
+
+```{r MIP}
+plot(bma_model, which=4)
+```
+
+
+This plot shows the importance of different predictors, with red lines representing predictors with a marginal inclusion probability above .5, which suggests these variables (IMDB rating and Critics score) are important to predict the audience score. 
+
+
+```{r image}
+image(bma_model,rotate = F)
+```
+
+
+The image of the model space allow us to see clearly which predictors are included the most in the top models. It can also help see colinear variables, which would have a typical negative patterns in this image, which is not the case here. 
+
+* * *
+
+## Part 5: Prediction
+I selected the movie Inception, as it's a movie for the American market released before 2016. I manually entered the data found on Rotten Tomatoes, IMDB and  Boxofficemojo websites. 
+
+```{r new-movie}
+inception <- data.frame(feature_film = "yes", drama = "yes", runtime = 148, mpaa_rating_R = "no", thtr_rel_year = 2010, oscar_season = "no", summer_season = "yes", imdb_rating = 8.8, imdb_num_votes = 1721951, critics_score = 86,  best_pic_nom ="yes", best_actor_win="yes", best_pic_win ="yes", best_pic_win = "no", best_actress_win = "yes", best_dir_win = "no", top200_box = "no")
+```
+
+```{r prediction}
+inception_pred = predict(bma_model, newdata = inception, estimator="BPM"); 
+inception_pred$fit
+```
+
+The predicted audience score for inception using BPM, the Best Predictive Model, is 98.13, which is not too far off from the actual audience score of 91! 
+
+* * *
+
+## Part 6: Conclusion
+With this analysis we've seen the characteristics associated with a popular movie, as defined by a movie with a high audience score on rotten tomatoes. We've seen for instance that IMDB ratings have a strong, positive relationship with audience score. We've also built a predictive model based on Bayesian statistics and were able to predict the audience score of Inception. 
+
+Some issues with this study can be found with the residuals, whose constant variability is far from perfect, as well as limited information on uncertainty linked to the predictions, due to time constraints. Thanks for reading.

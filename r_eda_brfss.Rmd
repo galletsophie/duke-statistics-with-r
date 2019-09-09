@@ -1,0 +1,305 @@
+---
+title: "Exploring the BRFSS data"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+```
+
+### Load data
+
+```{r load-data}
+load("brfss2013.RData")
+```
+
+
+
+* * *
+
+## Part 1: Data
+
+
+The observations in the sample were collected in 2013 both by landline telephone- and cellular telephone-based survey, in the fifty states of the United States as well as in the District of Columbia, Guam and the Commonwealth of Puerto Rico, all referred to as states in this document. For landline telephone-based surveys, interviewers collected data from a randomly selected adult in a household. For cellular telephone-based surveys, interviewers collected data from an adult who participates by using a cellular telephone and resides in a private residence or college housing. As a consequence, homeless people are excluded from the survey. Additionally, the surveyed population consists of non-institutionalized residents of the states aged 18 and older. 
+
+In 2013, according to the American Community Survey (ACS) and to the Universal Service Monitoring Report by the Federal Commission USA, 97.7% of all occupied housing units in the United States and 93.8% of all occupied households in Puerto Rico had telephone service available. This dual-frame survey is thus relatively representative of the general population. As random sampling was employed, the results should be generalizable to the largest population of the residents, aged 18 and older, of the states mentioned above, who are not institutionalized, and who reside in a household with a landline, a private home or college housing, thus excluding the homeless population. In the absence of random assignment, the results won't suggest causality, only association. 
+
+* * *
+
+## Part 2: Research questions
+
+**Research question 1: Is there a relationship between physical activity and physical health?**
+
+It is commonly believed that there is a link between exercising and physical health (as well as mental health but this is out of the scope for this question). I'd like to see if analyzing the BRFSS data supports or rejects this claim. Additionally, results could be used by policy makers, schools, care takers and health insurance companies to improve the population's physical health and promote a healthy level of physical activity. 
+
+
+**Research question 2: Are sleep quality and depression linked, and are there any differences based on gender?**
+
+I would assume a negative relationship between sleep quality and depression, with low sleep quality associated with higher likelihood of depression. I'm also curious to see whether there are any differences between men and women on this regard. The results can be used primarily by mental health professionals, but could also prove helpful to companies that market products or services to depressed or sleep aware individuals. 
+
+
+**Research question 3: What is the relationship between fruit and vegetable intake and weight, if any?**
+
+It is generally accepted that eating a healthy amount of fruit and vegetables is linked to a healthy body weight. I'd like to see if the data confirms this. When more than a third of the US population is considered obese according to the CDC, leading to shorter life expectancies, obesity-related conditions and higher medical expenses, understanding better the relationship between weight and food habits could prove beneficial to policy makers, medical facilities, but also fitness institutes and personal trainers. This question could be complemented in the future with additional analysis on other food habits, such as sugar intake, and additional demographics, such as socioeconomic status and race. 
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+
+### Research question 1:
+Is there a relationship between physical activity and physical health? 
+
+The following calculated variables, all categorical, will be used to study the relationship between exercise and physical health:
+<ul>
+  <li>X_rfhlth: Adults With Good Or Better Health</li>  
+  <li>X_paindx1: Physical Activity Index</li>
+  <li>X_pacat1: Physical Activity Categories</li>
+</ul>
+  
+```{r plot-activity-health-1}
+#filter out the NA in Physical Activity Categories
+brfss2013_filt1 <- brfss2013 %>%
+  filter(X_pacat1 %in% c("Highly active","Active","Insufficiently active","Inactive"))
+
+#plot
+ggplot(brfss2013_filt1, aes(x = X_pacat1, fill = X_rfhlth)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = c("#008080","#ff8362"))+
+  labs(title = "Relationship between Physical Activity and Health - Graph 1",
+      x = "Physical Activity Categories", 
+      y = "Percentage", 
+      fill = "Health Categories") +
+  theme_classic()
+
+```
+
+The segmented bar plot above shows that the proportion of individuals with good or better health varies with the amount of physical activity individuals perform: The more active an individual is, the more likely he/she is to be in good or better health, which shows that there is a relationship between physical activity and physical health. 
+
+```{r plot-activity-health-2}
+#filter out the NA in Physical Activity Index
+brfss2013_filt2 <- brfss2013 %>%
+  filter(X_paindx1 %in% c("Met aerobic recommendations","Did not meet aerobic recommendations"))
+
+#plot
+ggplot(brfss2013_filt2, aes(x = X_paindx1, fill = X_rfhlth)) +
+  geom_bar(position = "fill", width = .5) +
+  scale_fill_manual(values = c("#008080","#ff8362")) +
+  labs(title = "Relationship between Physical Activity and Health - Graph 2",
+      x = "Physical Activity Index", 
+      y = "Percentage", 
+      fill = "Health Category") +
+  theme_classic() +
+  scale_size_area(max_size = 1)
+```
+<br />
+
+The segmented bar plot above confirms the findings of the previous graph, with a higher proportion of individuals in good or better health among those who meet aerobic recommendations.
+
+
+```{r statistics-activity-health}
+
+tbl_phys = table(data.frame(Activity= brfss2013$X_pacat1,
+                            Health=brfss2013$X_rfhlth))
+tbl2_phys = round(tbl_phys/rowSums(tbl_phys), 2);
+tbl2_phys
+```
+
+The two-way table percentages shows that the highest percentage of individuals in good or better health can be found among individuals who are highly active, while the lowest percentage of individuals in good or better health is found in the group of individuals who are inactive. 
+
+<br />
+**Summary**
+
+The data analysis suggests a positive relationship between the quality of health and the level of physical activity in our data, which can be generalized to the non-institutionalized, not homeless population aged 18 years and older of the USA, Guam and Puerto Rico. This data could prove helpful to health institutions, physical therapy and fitness centers, as well as individuals looking to improve their health or physical activity levels. 
+
+
+
+### Research question 2:
+Are sleep quality and depression linked, and are there any differences based on gender? 
+
+
+The following variables will be used to analyze the data for our research question.  
+<ul>
+  <li>sleptim1: Average number of hours slept</li>
+  <li>addepev2: Occurence of depression in lifetime (Yes /No)</li>
+  <li>sex: Sex of respondent</li>
+</ul>
+
+```{r sleep_amount-variable}
+#creating a new categorical variable based on sleep amount. 
+brfss2013 <- brfss2013 %>%
+  mutate(sleep_amount=ifelse(sleptim1 <= 4, "1. Very Low (<=4)",
+                             ifelse(sleptim1 <= 6, "2. Low (5-6)",
+                                    ifelse(sleptim1 <= 9, "3. Normal (7-9)",
+                                           ifelse(sleptim1 <= 11, "4. High (9-11)",
+                                                  "5. Very High (>=12)")))))
+```
+
+The newly created categorical variable sleep_amount was designed based on the hours of sleep per day recommended by the National Sleep Foundation (NSF) for adults. Note that the NSF has slightly different recommendations for different age groups, but for simplicity I created only 5 categories of "sleep amount". 
+
+```{r plot-sleep-depression}
+#Filtering for Male & Female
+brfss2013_filtf<- brfss2013 %>%
+  filter(sex=="Female")
+
+brfss2013_filtm<- brfss2013 %>%
+  filter(sex=="Male")
+
+#Plot of sleep amount and depressive disorder for female adults
+ggplot(brfss2013_filtf, aes(x = sleep_amount, fill = addepev2)) +
+  geom_bar(position = "fill") +
+  labs(title = "Sleep amount and depressive disorder among female subjects",
+      x = "Sleep amount (hours)", 
+      y = "Percentage", 
+      fill = "Depressive Disorder") +
+  scale_fill_manual(values = c("#ff8362","#008080"))+
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+#Plot of sleep amount and depressive disorder for male subjects
+ggplot(brfss2013_filtm, aes(x = sleep_amount, fill = addepev2)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = c("#ff8362","#008080"))+
+  labs(title = "Sleep amount and depressive disorder among male adults",
+      x = "Sleep amount (hours)", 
+      y = "Percentage", 
+      fill = "Depressive Disorder") +
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+```
+
+
+The segmented bar plot suggests a relationship between sleep amount and the occurence of a depressive disorder. Surveyed individuals who sleep normal hours are the least likely to have experienced a depressive disorder, while surveyed individuals with a very low or very high sleep amount are more likely to have experienced a depressive disorder. 
+The patterns are similar whether the subject's sex is male or female, however, the plot clearly shows that a higher proportion of females has experienced a depressive disorder, compared to males. 
+
+```{r table-had-depressive-disorder-female}
+tbl_f = round(table(brfss2013_filtf$addepev2)/length(brfss2013_filtf$addepev2), 2);tbl_f
+
+```
+
+```{r table-had-depressive-disorder-male}
+tbl_m = round(table(brfss2013_filtm$addepev2)/length(brfss2013_filtm$addepev2), 2)
+tbl_m
+```
+
+These two percentage tables confirm a higher proportion of depressive disorder occurrences among female subjects, compared to male subjects. 
+
+```{r statistics-sleep-depression}
+
+tbl_sleep = table(data.frame(Sleep= brfss2013$sleep_amount,Depression=brfss2013$addepev2))
+tbl2_sleep = round(tbl_sleep/rowSums(tbl_sleep), 2);
+tbl2_sleep
+```
+
+
+The two-way table percentages, which combines male and female subjects, shows that the group of adults sleeping 7 to 9 hours has the lowest rate of occurence of depressive disorder, while the highest rates can be found in the groups of adults sleeping less than 4 hours a night, or more than 12 hours. Hence, there is relationship between number of hours slept and occurence of depressive disorder. 
+
+
+```{r statistics-sleep-depression-female}
+#Two-way table for female subjects
+tbl_sleep_f = table(data.frame(Sleep = brfss2013_filtf$sleep_amount,
+                               Depression = brfss2013_filtf$addepev2))
+tbl2_sleep_f = round(tbl_sleep_f/rowSums(tbl_sleep_f), 2); tbl2_sleep_f
+
+```
+
+```{r statistics-sleep-depression-male}
+tbl_sleep_m = table(data.frame(Sleep = brfss2013_filtm$sleep_amount,
+                               Depression = brfss2013_filtm$addepev2))
+tbl2_sleep_m = round(tbl_sleep_m/rowSums(tbl_sleep_m), 2); tbl2_sleep_m
+```
+
+
+For female and male subjects, we observe a similar relationship: subjects sleeping normal hours have the lowest occurrence of depressive disorders, at 19.3% for female subjects, and 10.9% for male subjects, while the highest proportions can be found in subjects sleeping less than 4 hours, 47.6% and 37.1%, then in subjects sleeping more than 12 hours, 41,3% and 29.1%, for female and male subjects respectively. 
+
+<br />
+**Summary**
+
+The data analysis suggests a relationship between average sleep amount and occurence of depression in our data. We found that subjects sleeping normal hours (7-9h) are less likely to have experienced any forms of depression, while subjects sleeping very little, or a lot, are the most likely. Those findings can be generalized to the non-institutionalized, not homeless population aged 18 years and older of the USA, Guam and Puerto Rico, and used by health professionals working with individuals suffering with depressive or sleep disorders, but also companies who are targeting such markets. 
+
+### Research question 3:
+What is the relationship between fruit and vegetable intake and weight, if any?
+
+Variables
+<br />
+<ul>
+  <li>X_bmi5cat: Computed Body Mass Index Categories</li>
+  <li>X_frutsum: Total Fruits Consumed Per Day (two implied decimal)</li>
+  <li>X_vegesum: Total Vegetables Consumed Per Day (two implied decimal)</li>
+</ul>
+
+```{r fvcat-variable}
+
+#Sums the daily totals for fruits and vegetables, divides it by 100 (the two variables have 2 implied decimal places), then rounds to the nearest integer using the round() method.  
+brfss2013 <- brfss2013 %>%
+  mutate(fvsum = round((X_frutsum + X_vegesum) /100, 0))
+
+#Creates a categorical variable based on the total fruits and vegetables consumed per day
+brfss2013 <- brfss2013%>%
+  mutate(fvcat = ifelse(fvsum == 0, "0",
+                      ifelse(fvsum <= 1, "1",
+                             ifelse(fvsum <= 2, "2",
+                                    ifelse(fvsum <= 3, "3",
+                                           ifelse(fvsum <= 4, "4",
+                                                  ifelse(fvsum <= 5, "5", "6+")))))))
+```
+
+
+
+```{r plot-fvcat-weight}
+
+#filter out NA for both variables
+brfss2013_filt7 <- brfss2013 %>%
+  filter(fvcat %in% c("0","1","2","3","4","5","6+"),
+         X_bmi5cat %in% c("Underweight","Normal weight","Overweight","Obese"))
+
+#plot
+ggplot(brfss2013_filt7, aes(x = fvcat,fill = X_bmi5cat)) +
+  geom_bar(position = "fill") +
+  labs(title = "Daily Fruits and Vegetable Intake and Weight Categories",
+      x = "Fruits & Veggies Intake", 
+      y = "Percentage", 
+      fill = "Weigth Categories") +
+  scale_fill_manual(values = c("#16594a","#12908e","#f98f45","#c4421a")) +
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+
+```
+
+
+The segmented graph shows small variations in weight categories based on daily fruit and vegetable intake. Starting at 1 daily portion of fruit and vegetable, we observe a small but steady decrease in obese prevalence, and inversly a small increase in the proportion of normal weight subject. It's interesting to note that subjects eating 0 (or close to 0) fruit and vegetable a day have a lower percentage of overweight or obese subjects than those eating about 1 or 2 fruits and vegetables a day. 
+
+The plotted data shows that there is a relationship between fruits and vegetables intake and weight.
+
+```{r table-fvcat-overweight}
+tbl_fvcat = table(data.frame(Fvcat = brfss2013_filt7$fvcat,
+                             Weight = brfss2013_filt7$X_bmi5cat))
+tbl2_fvcat = round(tbl_fvcat/rowSums(tbl_fvcat), 2);
+tbl2_fvcat
+```
+
+
+
+The data summarized in this two way table shows a relationship between weight and the daily amount of fruits and vegetables consumed: starting at 1 daily portion of fruit and vegetable, the proportion of normal weight subjects steadily increases with the number of daily fruits and vegetables consumed, while the number of obese subjets steadily decreases. Hence there are approximately 10% less obese subjects among those eating 5 or more fruits and vegetables a day, compared to those eating 1 or less fruit and vegetable a day. 
+
+<br />
+**Remarks**
+
+While the percentages of normal weights and obeses evolve steadily (increases and decreases, respectively) as the number of daily fruits and vegetables goes up, the percentages of underweights and overweights follow a different pattern: the proportion of overweight first increases then decreases, with a peak at 3 daily fruits and vegetables and 37.3% overweight, while the underweight proportion behaves inversely. 
+
+<br />
+**Summary**
+
+The data analysis suggests a relationship between daily fruits and vegetables intake, and weight categories. Those findings can be generalized to the non-institutionalized, not homeless population aged 18 years and older of the USA, Guam and Puerto Rico, and used to design programs to tackle obesity, but also help overweight or underweight individuals and promote healthy eating habits. 

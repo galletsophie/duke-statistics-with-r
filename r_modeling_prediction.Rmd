@@ -1,0 +1,742 @@
+---
+title: "Modeling and prediction for movies"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+    author: Sophie Gallet
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(MASS)
+```
+
+### Load data
+
+```{r load-data}
+load("movies.Rdata")
+```
+
+* * *
+
+## Part 1: Data
+
+This is a fictional project where I'm tasked by Paramount Pictures to find interesting and new information by analyzing movies ratings.
+
+The data set is the result of random sampling 651 movies released before 2016 using Rotten Tomatoes and IMDb's APIs. As random sampling was used, and the random sample represents less than 10% of all movies released before 2016, we'll be able to generalize the findings of our study to the population of interest: 
+
+Both websites are owned by American companies, Fadango and Amazon respectively, and written in English. While they do feature 'foreign' movies, we can expect a higher representation of American and English speaking movies, critics, and audience. In addition, some of the variables in the data set that might be used in our model, specifically Oscar awards and box office, are geared towards the American audience. 
+Regarding release years, to avoid extrapolation, we can generalize the results to movies released before 2016.
+
+In light of this and given the use of random sampling we can assess that our findings, and in particular any association between variables, can be generalized to all movies made for the American market and released before 2016. 
+
+This is an observational study, not an experiment with random assignment, thus we cannot prove causation.  
+
+* * *
+
+## Part 2: Research question
+
+### If any, what are the variables that are associated with the critics score of a movie on Rotten Tomatoes?
+
+While audience ratings have become more important over the last ten years with the rise of Internet, critic scores have long been the reference to evaluate the quality of a movie, and are most likely still influential today (this could be the subject of another study). It would be interesting to see which elements are associated with critics score, and which ones are not. We might find out surprising information, uncover trends that could help define future strategies at Paramount, and discover where to focus future research (experimental if at all possible). 
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+### IMDB Rating & Critics Score
+
+Can we find a relationship in our sample data between the IMDB rating and the critics score on Rotten Tomatoes?
+
+We'll plot the data, and calculate the correlation coefficient. 
+
+```{r plot-critics-imdb_rating}
+ggplot(data = movies, aes(x = imdb_rating, y = critics_score)) +
+  geom_point() + 
+  labs(main = "Relationship IMDB Rating & Critics Score", 
+       x = "IMDB Rating",
+       y = "Critics score")
+```
+
+
+```{r cor-critics-imdb_rating}
+cor(movies$critics_score,movies$imdb_rating)
+```
+
+The plot shows a relatively strong linear positive relationship between critics scores and IMDB ratings, without any obvious outliers. The direction and strength of the relationship is confirmed by a positive correlation coefficient R relatively close to 1. 
+
+There appears to be an associative relationship between critics scores and IMDB ratings as we've observed that movies with high IMDB ratings also have high critics score. 
+
+### Drama & Critics Score
+
+In our dataset, is there a difference in critics score whether a movie is a drama or not?
+
+Let's first create a binary categorical variable drama: 
+```{r drama}
+movies <- movies %>%
+  mutate(drama = ifelse(genre == "Drama", "yes", "no"))
+```
+
+Then, let's look at what our data looks like, and calculate summary statistics:
+
+```{r plot-critics-drama}
+boxplot(critics_score ~ drama, data = movies)
+```
+
+```{r stats-critics-drama}
+movies %>% 
+  group_by(drama) %>%
+  summarize(min = min(critics_score),
+            q1 = quantile(critics_score,.25),
+            med = median(critics_score),
+            q3 = quantile(critics_score,.75),
+            max = max(critics_score),
+            mean = mean(critics_score)) %>%
+  arrange(desc(drama))
+```
+
+The side-by-side boxplots and the five-number summaries, complemented by the means, show a lower spread, both in terms of range and IQR, for movies that are drama (under the "yes" category), compared to movies that aren't, meaning that there is less variability in the critics score for movies that are drama. The distribution of critics score for non drama movies seems roughly symmetric, centered around 55, while the distribution of critics scores for drama movies appears left-skewed, as evidenced by a median closer to the 75th percentile. With a higher first quartile and median, the dramas in this sample appear to have higher critics scores than non-drama movies. 
+
+Note that both categories contain roughly the same numbers of movies: 
+
+```{r size-drama}
+table(movies$drama)
+```
+
+In summary, the boxplots and statistics suggest a relationship between whether the movie is a drama or not, and its critics score in our sample: we've observed higher critics score for drama movies. 
+
+### Audience Rating & Critics Score
+
+Is there a relationship in our sample data between Rotten Tomatoes's audience rating and its critics score?
+
+I would expect them to be somewhat positively correlated, with the exception of a few 'too intellectual' movies. 
+
+As audience rating is a categorical variable, we'll be looking at boxplots and the five number summaries, along with a table counting the number of movies in each category.
+
+```{r plot-critics-audience_rating}
+boxplot(critics_score~audience_rating, data = movies)
+```
+```{r stats-critics-audience_rating}
+movies %>% 
+  group_by(audience_rating) %>%
+  summarize(min = min(critics_score),
+            q1 = quantile(critics_score,.25),
+            med = median(critics_score),
+            q3 = quantile(critics_score,.75),
+            max = max(critics_score))
+```
+```{r table-audience_rating}
+table(movies$audience_rating)
+```
+
+The differences between the two groups are striking: 
+The Upright category's first quartile is higher than the third quartile of the Spilled category, respectively 59 and 56, meaning that a much higher proportions of movies in the Spilled category have a low critics score. There are large differences between the medians: the Upright median is more than twice as high as the Spilled median. 
+The spread and IQR of the Spilled category are moderately bigger than those of the Upright category, hence the variability is somewhat similar between the two groups. The distribution of critics score for the Spilled category is slightly right-skewed, while there is a stronger skew, left, for the Upright category, which translates into a higher proportion of high critics scores. We can spot some low outliers for the Upright group.  
+
+In summary, there appears to be an association between critics scores and the audience rating in our dataset. Movies in the Upright category in our sample have a high critics score, and inversely, a movie in the Spilled category a low critics score.
+
+* * *
+
+## Part 4: Modeling
+
+In this step, we'll build a model to predict critics score. We'll first decide on the variables we keep for the full model, our baseline, and then will work to improve it with model selection. 
+
+### Variables Selection
+
+The following variables did not make sense to include in the statistical analysis as they bring little to no information and are too individualized (there are 647 different movie titles, 650 URL for Rotten Tomatoes, 486 unique actor1, etc.), and were thus excluded from the analysis:
+<ul>
+  <li>title</li>
+  <li>director</li>
+  <li>actor1</li>
+  <li>actor2</li>
+  <li>actor3</li>
+  <li>actor4</li>
+  <li>actor5</li>
+  <li>imdb_url</li>
+  <li>rt_url</li>
+</ul>
+
+Additionnally, the following variables were removed as they were, by definition, not independent from other variables that we kept for the model (we kept numerical variables over their categorical counterparts):
+<ul>
+  <li>critics_rating, as we kept critics_score, the reponse variable</li>
+  <li>audience_rating, as we (initially) kept audience_score</li>
+  <li>best_pic_win, as we kept best_pic_nom, and logic would assume a movie has to be nominated to win an oscar (there's one movie though that did win an oscar without being nominated), so both  variables are dependent. We kept best_pic_nom as it has more movies in the "yes" group (22 vs. 7)</li>
+</ul>
+
+Next, let's look at the relationship between audience_score and imdb_rating:
+```{r plot-audience-imdb_rating}
+ggplot(movies, aes(x=audience_score, y = imdb_rating))+
+  geom_point()
+```
+
+```{r cor-audience-imdb_rating}
+cor(movies$audience_score,movies$imdb_rating)
+```
+
+Audience score and IMDB ratings are strongly correlated, hence we'll need to remove one of the two to avoid (multi)collinearity. As the full model scores a higher adjusted R squared with IMDB ratings, we'll keep this one. 
+
+Finally, the two months variable were transformed to categorical variables in line with seasons:
+
+```{r season}
+movies <- movies %>%
+  mutate(thtr_rel_season = ifelse(thtr_rel_month %in% range(7:9), "summer",
+                         ifelse(thtr_rel_month %in% range(10:12), 'fall',
+                                ifelse(thtr_rel_month %in% range (1:3), 'winter', 'spring'))))
+
+movies <- movies %>%
+  mutate(dvd_rel_season = ifelse(dvd_rel_month %in% range(7:9), "summer",
+                         ifelse(dvd_rel_month %in% range(10:12), 'fall',
+                                ifelse(dvd_rel_month %in% range (1:3), 'winter', 'spring'))))
+```
+
+The full model we start with thus comprises the following 18 variables:
+<ul>
+  <li>title_type</li>
+  <li>genre</li>
+  <li>runtime</li>
+  <li>mpaa_rating</li>
+  <li>studio</li>
+  <li>thtr_rel_year</li>
+  <li>thtr_rel_season</li>
+  <li>thtr_rel_day</li>
+  <li>dvd_rel_year</li>
+  <li>dvd_rel_season</li>
+  <li>dvd_rel_day</li>
+  <li>imdb_rating</li>
+  <li>imdb_num_votes</li>
+  <li>best_pic_nom</li>
+  <li>best_actor_win</li>
+  <li>best_actress_win</li>
+  <li>best_dir_win</li>
+  <li>top200_box</li>
+</ul>
+
+There are 17 NAs in the variables we kept, and no specific trends were found to explain those. We'll thus remove them.   
+
+```{r NA-removal}
+#selecting only the variables we're using for the full model (to avoid removing data we don't need to remove)
+full_data <- movies %>%
+  select(critics_score,title_type,genre,runtime,mpaa_rating,studio,thtr_rel_year,thtr_rel_season,thtr_rel_day,dvd_rel_year,dvd_rel_season,dvd_rel_day,imdb_rating,imdb_num_votes,best_pic_nom,best_actor_win,best_actress_win,best_dir_win,top200_box)
+
+#removing the 17 NAs.
+full_data = na.omit(full_data)
+```
+
+### Full Model
+
+We'll now fit our full model with the variables defined above.
+```{r full-model}
+full_model = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+```
+Given the large number of variables, and levels for the categorical variables, and in order not to fill pages with statistics, I will avoid printing the summary for now, and only display the adjusted R squared:
+
+```{r summary-full_model}
+summary(full_model)[9]
+```
+This is a reasonable adjusted R squared that we'll be able to improve with model selection.
+
+### Finding the best model 
+We'll use backwards selection with adjusted R squared, more reliable than the p-value, which is based on an arbitrary significance level, to find our best model. 
+
+For each of the following 6 codes of chunk: we remove one variable at a time and compute the adjusted R squared. The model with the highest adjusted R squared is kept and we repeat the same process until the adjusted R squared doesn't increase anymore. That's when we know we've found the best model. 
+
+Note that this is quite a lot of (repetitive) code.
+
+```{r backwards-selection-1}
+m1 = lm(critics_score ~ genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m2 = lm(critics_score ~ title_type + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m3 = lm(critics_score ~ title_type + genre + runtime + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m4 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m5 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m6 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m7 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m8 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m9 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m10 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m11 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m12 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m13 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m14 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes + best_actor_win + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m15 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m16 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_dir_win + top200_box,
+                data = full_data)
+
+m17 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win  + top200_box,
+                data = full_data)
+
+m18 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actor_win + best_actress_win + best_dir_win,
+                data = full_data)
+
+summary_r_squared <- data.frame(model = c("Full", "-title_type", "-genre", "-runtime", "-mpaa_rating", "-studio", "-thtr_rel_year", "-thtr_rel_season", "-thtr_rel_day", "-dvd_rel_year", "-dvd_rel_season", "-dvd_rel_day", "-imdb_rating", "-imdb_num_votes", "-best_pic_nom", "-best_actor_win", "-best_actress_win", "-best_dir_win", "-top200_box"), 
+                                adj.r.squared = c(summary(full_model)$adj.r.squared, summary(m1)$adj.r.squared, summary(m2)$adj.r.squared, summary(m3)$adj.r.squared, summary(m4)$adj.r.squared, summary(m5)$adj.r.squared, summary(m6)$adj.r.squared, summary(m7)$adj.r.squared, summary(m8)$adj.r.squared, summary(m9)$adj.r.squared, summary(m10)$adj.r.squared, summary(m11)$adj.r.squared, summary(m12)$adj.r.squared, summary(m13)$adj.r.squared, summary(m14)$adj.r.squared, summary(m15)$adj.r.squared,  summary(m16)$adj.r.squared, summary(m17)$adj.r.squared, summary(m18)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+```
+Removing the best actor win variable yields the highest adjusted R squared. 
+
+Let's move on to step 2:
+```{r backwards-selection-2}
+m1 = lm(critics_score ~ genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m2 = lm(critics_score ~ title_type + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m3 = lm(critics_score ~ title_type + genre + runtime + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m4 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m5 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m6 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m7 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m8 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m9 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m10 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m11 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m12 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m13 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m14 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m15 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m16 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win  + top200_box,
+                data = full_data)
+
+m17 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win,
+                data = full_data)
+
+summary_r_squared <- data.frame(model = c("Full", "-title_type", "-genre", "-runtime", "-mpaa_rating", "-studio", "-thtr_rel_year", "-thtr_rel_season", "-thtr_rel_day", "-dvd_rel_year", "-dvd_rel_season", "-dvd_rel_day", "-imdb_rating", "-imdb_num_votes", "-best_pic_nom", "-best_actress_win", "-best_dir_win", "-top200_box"), 
+                                adj.r.squared = c(summary(full_model)$adj.r.squared, summary(m1)$adj.r.squared, summary(m2)$adj.r.squared, summary(m3)$adj.r.squared, summary(m4)$adj.r.squared, summary(m5)$adj.r.squared, summary(m6)$adj.r.squared, summary(m7)$adj.r.squared, summary(m8)$adj.r.squared, summary(m9)$adj.r.squared, summary(m10)$adj.r.squared, summary(m11)$adj.r.squared, summary(m12)$adj.r.squared, summary(m13)$adj.r.squared, summary(m14)$adj.r.squared, summary(m15)$adj.r.squared,  summary(m16)$adj.r.squared, summary(m17)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+```
+
+Removing the best_actress_win yields the highest adjusted R-squared. 
+
+```{r backwards-selection-3}
+m1 = lm(critics_score ~ genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m2 = lm(critics_score ~ title_type + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m3 = lm(critics_score ~ title_type + genre + runtime + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m4 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m5 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m6 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m7 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m8 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m9 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m10 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m11 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m12 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_num_votes +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m13 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m14 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes + best_dir_win + top200_box,
+                data = full_data)
+
+m15 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom  + top200_box,
+                data = full_data)
+
+m16 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + imdb_num_votes +  best_pic_nom + best_dir_win,
+                data = full_data)
+
+summary_r_squared <- data.frame(model = c("Full", "-title_type", "-genre", "-runtime", "-mpaa_rating", "-studio", "-thtr_rel_year", "-thtr_rel_season", "-thtr_rel_day", "-dvd_rel_year", "-dvd_rel_season", "-dvd_rel_day", "-imdb_rating", "-imdb_num_votes", "-best_pic_nom", "-best_dir_win", "-top200_box"), 
+                                adj.r.squared = c(summary(full_model)$adj.r.squared, summary(m1)$adj.r.squared, summary(m2)$adj.r.squared, summary(m3)$adj.r.squared, summary(m4)$adj.r.squared, summary(m5)$adj.r.squared, summary(m6)$adj.r.squared, summary(m7)$adj.r.squared, summary(m8)$adj.r.squared, summary(m9)$adj.r.squared, summary(m10)$adj.r.squared, summary(m11)$adj.r.squared, summary(m12)$adj.r.squared, summary(m13)$adj.r.squared, summary(m14)$adj.r.squared, summary(m15)$adj.r.squared,  summary(m16)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+```
+
+Now removing imdb_num_votes:
+
+```{r backwards-selection-4}
+m1 = lm(critics_score ~ genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m2 = lm(critics_score ~ title_type + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m3 = lm(critics_score ~ title_type + genre + runtime + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m4 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m5 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m6 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m7 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m8 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m9 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m10 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m11 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m12 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m13 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating + best_dir_win + top200_box,
+                data = full_data)
+
+m14 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom  + top200_box,
+                data = full_data)
+
+m15 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_year + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win,
+                data = full_data)
+
+summary_r_squared <- data.frame(model = c("Full", "-title_type", "-genre", "-runtime", "-mpaa_rating", "-studio", "-thtr_rel_year", "-thtr_rel_season", "-thtr_rel_day", "-dvd_rel_year", "-dvd_rel_season", "-dvd_rel_day", "-imdb_rating", "-best_pic_nom", "-best_dir_win", "-top200_box"), 
+                                adj.r.squared = c(summary(full_model)$adj.r.squared, summary(m1)$adj.r.squared, summary(m2)$adj.r.squared, summary(m3)$adj.r.squared, summary(m4)$adj.r.squared, summary(m5)$adj.r.squared, summary(m6)$adj.r.squared, summary(m7)$adj.r.squared, summary(m8)$adj.r.squared, summary(m9)$adj.r.squared, summary(m10)$adj.r.squared, summary(m11)$adj.r.squared, summary(m12)$adj.r.squared, summary(m13)$adj.r.squared, summary(m14)$adj.r.squared, summary(m15)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+```
+
+Removing dvd_release_year:
+
+```{r backwards-selection-5}
+m1 = lm(critics_score ~ genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m2 = lm(critics_score ~ title_type + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m3 = lm(critics_score ~ title_type + genre + runtime + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m4 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m5 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m6 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actress_win + best_dir_win + top200_box,
+                data = full_data)
+
+m7 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m8 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m9 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m10 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + imdb_rating +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m11 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day +  best_pic_nom + best_dir_win + top200_box,
+                data = full_data)
+
+m12 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating + best_dir_win + top200_box,
+                data = full_data)
+
+m13 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom  + top200_box,
+                data = full_data)
+
+m14 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_dir_win,
+                data = full_data)
+
+summary_r_squared <- data.frame(model = c("Full", "-title_type", "-genre", "-runtime", "-mpaa_rating", "-studio", "-thtr_rel_year", "-thtr_rel_season", "-thtr_rel_day", "-dvd_rel_season", "-dvd_rel_day", "-imdb_rating", "-best_pic_nom", "-best_dir_win", "-top200_box"), 
+                                adj.r.squared = c(summary(full_model)$adj.r.squared, summary(m1)$adj.r.squared, summary(m2)$adj.r.squared, summary(m3)$adj.r.squared, summary(m4)$adj.r.squared, summary(m5)$adj.r.squared, summary(m6)$adj.r.squared, summary(m7)$adj.r.squared, summary(m8)$adj.r.squared, summary(m9)$adj.r.squared, summary(m10)$adj.r.squared, summary(m11)$adj.r.squared, summary(m12)$adj.r.squared, summary(m13)$adj.r.squared, summary(m14)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+```
+
+Removing best_dir_win:
+
+```{r backwards-selection-6}
+m1 = lm(critics_score ~ genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m2 = lm(critics_score ~ title_type + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m3 = lm(critics_score ~ title_type + genre + runtime + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m4 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actress_win + top200_box,
+                data = full_data)
+
+m5 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m6 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actress_win + top200_box,
+                data = full_data)
+
+m7 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m8 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m9 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m10 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m11 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day +  best_pic_nom + top200_box,
+                data = full_data)
+
+m12 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating + top200_box,
+                data = full_data)
+
+m13 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom,
+                data = full_data)
+
+summary_r_squared <- data.frame(model = c("Full", "-title_type", "-genre", "-runtime", "-mpaa_rating", "-studio", "-thtr_rel_year", "-thtr_rel_season", "-thtr_rel_day", "-dvd_rel_season", "-dvd_rel_day", "-imdb_rating", "-best_pic_nom", "-top200_box"), 
+                                adj.r.squared = c(summary(full_model)$adj.r.squared, summary(m1)$adj.r.squared, summary(m2)$adj.r.squared, summary(m3)$adj.r.squared, summary(m4)$adj.r.squared, summary(m5)$adj.r.squared, summary(m6)$adj.r.squared, summary(m7)$adj.r.squared, summary(m8)$adj.r.squared, summary(m9)$adj.r.squared, summary(m10)$adj.r.squared, summary(m11)$adj.r.squared, summary(m12)$adj.r.squared, summary(m13)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+```
+
+Removing thtr_rel_season would yield the same adjusted R squared as the model from the previous step. To reach the most parsimonious model possible, we'll remove this variable too. 
+
+```{r backwards-selection-7}
+m1 = lm(critics_score ~ genre + runtime + mpaa_rating + studio + thtr_rel_year  + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m2 = lm(critics_score ~ title_type + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m3 = lm(critics_score ~ title_type + genre + runtime + studio + thtr_rel_year + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m4 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + best_actress_win + top200_box,
+                data = full_data)
+
+m5 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m6 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year  + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m7 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year  + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m8 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year  + thtr_rel_day + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m9 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year  + thtr_rel_day + dvd_rel_season + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+
+m10 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year  + thtr_rel_day + dvd_rel_season + dvd_rel_day +  best_pic_nom + top200_box,
+                data = full_data)
+
+m11 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year  + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating + top200_box,
+                data = full_data)
+
+m12 = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year  + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom,
+                data = full_data)
+
+summary_r_squared <- data.frame(model = c("Full", "-title_type", "-genre", "-runtime", "-mpaa_rating", "-studio", "-thtr_rel_year", "-thtr_rel_day", "-dvd_rel_season", "-dvd_rel_day", "-imdb_rating", "-best_pic_nom", "-top200_box"), 
+                                adj.r.squared = c(summary(full_model)$adj.r.squared, summary(m1)$adj.r.squared, summary(m2)$adj.r.squared, summary(m3)$adj.r.squared, summary(m4)$adj.r.squared, summary(m5)$adj.r.squared, summary(m6)$adj.r.squared, summary(m7)$adj.r.squared, summary(m8)$adj.r.squared, summary(m9)$adj.r.squared, summary(m10)$adj.r.squared, summary(m11)$adj.r.squared, summary(m12)$adj.r.squared))
+
+summary_r_squared %>%
+  arrange(desc(adj.r.squared))
+```
+
+Removing any other variable would now yield a lower adjusted R squared than the one from the previous step. 
+We have thus removed from the full model three variables linked to the oscar awards for actor/ actress and best director, the season of release in theatre and the year of release in dvd, as well as the number of votes on IMDB. 
+
+Our best model is thus the following with a 64.25% correlation coefficient R:
+We'll skip the complete summary for now as, with the 211 levels for studio, it fills up pages:
+```{r best-model}
+best_model = lm(critics_score ~ title_type + genre + runtime + mpaa_rating + studio + thtr_rel_year + thtr_rel_season + thtr_rel_day + dvd_rel_season + dvd_rel_day + imdb_rating +  best_pic_nom + top200_box,
+                data = full_data)
+summary(best_model)[9]
+```
+### Diagnostic
+Our findings are reliable if the following conditions are met:
+
+<ul>
+  <li>linear relationship between predictors and the reponse variable</li>
+  <li>nearly normal residuals with mean 0</li>
+  <li>constant variability of residuals</li>
+  <li>independence of residuals</li>
+</ul>
+
+Let's first look at the linearity between x and y, where x are the numerical explanatory variables. We'll use residuals plots, which we've seen, allow to consider the other variables that are also in the model. 
+
+```{r linearity-numerical}
+plot(best_model$residuals ~ full_data$runtime, main = "Residuals vs. runtime")
+plot(best_model$residuals ~ full_data$thtr_rel_year, main = "Residuals vs. thtr_rel_year")
+plot(best_model$residuals ~ full_data$thtr_rel_day, main = "Residuals vs. thtr_rel_day")
+plot(best_model$residuals ~ full_data$dvd_rel_day, main = "Residuals vs. dvd_rel_day")
+plot(best_model$residuals ~ full_data$imdb_rating, main = "Residuals vs. imdb_rating")
+```
+
+The plots show (perfect to fair enough) random scatters centered around 0, indicating that there are linear relationships between y, critics_score and all our numerical explanatory variables.
+
+Let's check the second condition using the normal probability plot for the best model: 
+```{r plot-model}
+par(mfrow=c(2,2))
+plot(best_model,2)
+```
+
+Looking at the normal probability plot, which forms a straight line, we see that residuals follow a nearly normal distribution centered at 0.
+
+Next, the observations were independent thanks to random sampling, so we can assume residuals are independent. 
+
+Lastly, we'll look at the constant variability of residuals using plots of residuals vs. fitted values.
+
+```{r residuals-fitted}
+plot(best_model$residuals ~ best_model$fitted.values, main = "Residuals vs. Fitted")
+plot(abs(best_model$residuals) ~ best_model$fitted.values, main = "Absolute Value of Residuals vs. Fitted")
+```
+
+While we would like to see the residuals scattered in a band with a constant width centered at 0, here, we see that there is some heteroscedasticity in the residuals. This is very problematic.  Further analysis on what is causing this heteroscedasticity in the residuals, how we can prevent it (Cox Box transformation could be helpful) and performing the regression again is the right step to take. 
+
+All in all, the conditions for multiple linear regression are fairly satisfied, with the exception of constant variability in the residuals. We'll pretend this condition is met for the sake of the exercise, keeping in mind though that are model is unreliable because of it. 
+
+### Interpreting the Coefficients
+
+Let's take a look at our coefficients (warning: this is a long list): 
+```{r coef-model}
+summary(best_model)[4]
+```
+
+When looking at the coefficients, some of the findings were expected, such as:
+<ul>
+<li>With a coefficient of approximately 17.95 for the IMDB rating, all else being equal, we would expect the critics score to increase by 17.95 point for each one point increase in IMDB rating, on average. We also note that with the smallest p-value of 2.88e-54, this is most likely the predictor with the strongest association with regards to critics score.</li>
+<li>Having a Best Picture nomination or being in the top 200 of the box office all are associated with positive coefficients, and thus, all else being equal, we would expect the critics score to increase, on average, when any of those conditions are met, compared to if they were not. We note though that in both cases, the p-value for those coefficients is higher than the commonly accepted significance level of 0.05, meaning that those coefficients might not be strongly related to changes in the reponse variable. This is the case for many of the coefficients in this model.</li>
+</ul>
+
+
+Some additional findings that I find interesting:
+<ul>
+<li>Type of films: movies of the type Feature film have a negative coefficient of -20.85, with a p-value below 0.05: all else being equal, we would expect the critics score to decrease by about 20.85 points if a movie belongs to this category, on average. </li>
+<li>Genre: Movies that are categorized as 'Other' have a positive coefficient around 10.5, and a somewhat small p-value of 0.079. We would expect, on average and all else being equal, movies in this genre to have a critics score 1</li>
+<li>MPAA Rating: the levels NC-17 and Unrated have positive coefficients, while the levels PG, PG-13 and R have negative coefficients. All else being euqal, we would expect, on average, a movie with one of the first two ratings to yield a better critics score, and a movie with one of the latter three rating to have a lower critics score. All those coefficients have somewhat large p-value, and as such, might not be so strongly associated with the response variable</li>
+<li>Studio: Looking at the levels and their coefficients for the studio variable brings a lot of valuable information. It shows which of the studios owned by Paramount Pictures have high coefficients and are thus most likely, on average and all else being equal, to produce a movie with a high critics score (Paramount Vantage, Paramount Studios) and which one are the opposite (Paramount). It also shows which competitors have high positive coefficient, and thus which we would expect to get a high critics score (such as Millenium Entertainment, Live Home Video, Hatchet Films) and vice versa (such as Innovation Film Group, Brainstorm Media). Here again, we want to nuance our findings when the p-value are somewhat large.</li>
+<li>The year of release in theater is associated with a small but negative coefficient of -0.39, and a small p-value. All other things equal, we would expect on average the critics score to decrease by 0.39 for each additional year. Put simply, older movies, on average and all else equal, are expected to have higher critics scores.</li>
+</ul>
+
+* * *
+
+## Part 5: Prediction
+I selected the movie Inception, as it's a movie for the American market released before 2016. I manually entered the data found on Rotten Tomatoes, IMDB and Boxofficemojo websites. 
+
+```{r new-movie}
+inception <- data.frame(title_type = "Feature Film", genre = "Action & Adventure", runtime = 148, mpaa_rating = "PG-13",  studio = "Warner Bros. Pictures", thtr_rel_year = 2010, thtr_rel_season = "summer", thtr_rel_day = 18, dvd_rel_season = "winter", dvd_rel_day = 7, imdb_rating = 8.8,  best_pic_nom ="yes", top200_box = "no")
+inception
+```
+
+```{r predict}
+predict(best_model, inception)
+```
+Let's construct a confidence interval around this prediction in order to quantify the uncertainty surrounding the prediction, using the commonly used 95% significance level.   
+
+```{r predict-interval}
+predict(best_model, inception, interval = "prediction", level = 0.95)
+```
+Given an actual critics score of 86, the prediction is not too far off. 
+We can interpret the confidence interval the following way: the model predicts with 95% confidence that the movie inception is expected to have a critics score between 60.6 and 133.4. Note that a movie can't actually have a critics score higher than 100, and that the wide interval attests of a pretty high margin of error and thus variability. 
+
+* * *
+
+## Part 6: Conclusion
+Through this analysis, we've discovered the main relationships the critics score, our response variable, hold with the other variables in the dataset, with strong association for instance between IMDB ratings, audience ratings, the genres and the studios of the movies. We've also learned new things that could prove strategic to Paramount Pictures, such as the studios whose movies we would expect to have a higher critics score on average, and the ones that we would expect to have a low critics score (on average). We've also tested our model with a prediction on the movie Inception that didn't fall too far from the tree. 
+
+In terms of limitations, the most significant one is relative to the model diagnostic.
+While we've pretended we had constant variability in the residuals, this wasn't the case. Further study and model improvements need to be made to achieve better constant variability. 
+There was also a warning I couldn't remove despite a lot of research regarding the prediction that might be rank deficient. 
+Lastly, this is an observational study, with its limits for causation. Conducting an experiment could solve this, but I don't really see how we could procede. 
